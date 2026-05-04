@@ -1,4 +1,4 @@
-# Recipe Manager — Lab 37
+# Recipe Manager
 
 A recipe management system for restaurant kitchen staff. Create, edit, search, and display recipes per restaurant. Server-rendered HTML with zero frontend build step, backed by SQLite.
 
@@ -93,7 +93,3 @@ After running `make seed`, you can log in with any of these accounts (password f
     ├── layouts/      # Page layout templates
     └── pages/        # Page-level templates
 ```
-
-## License
-
-Private — Lab 37 take-home project.
