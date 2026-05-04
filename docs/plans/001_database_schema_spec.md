@@ -1,0 +1,214 @@
+# Spec 001: Database Schema, Migrations, Connection Layer, and Seed Data
+
+## Section 1: Context & Constraints
+
+### Milestone Entry
+
+> 001: Database schema, migrations, connection layer, and seed data — all 6 tables created, embedded migrations run on startup, seed script populates test data
+
+### Research Findings — Relevant Context
+
+**Codebase structure:**
+- Greenfield skeleton. No application code exists yet.
+- `go.mod` declares module `lab37`, Go 1.22, with dependencies: `github.com/golang-jwt/jwt/v5 v5.2.1` and `github.com/mattn/go-sqlite3 v1.14.22`.
+- `Makefile` expects entry point at `cmd/server` (does not exist yet).
+- `Makefile` has a `clean` target that removes `recipes.db` — confirms SQLite file-based DB at project root.
+- `migrations/` directory exists but is empty.
+- No `cmd/`, `internal/`, `views/`, or `static/` directories exist yet.
+
+**Database schema — 6 tables (from design document):**
+
+| Table | Purpose | Key Fields |
+|-------|---------|------------|
+| `recipes` | Core recipe data | id (UUID), name, restaurant_id (FK), instructions, yield (int), created_at, updated_at |
+| `restaurants` | Restaurant entities | id (UUID), name |
+| `users` | User accounts | id (UUID), username, password (hashed), role (admin/manager/staff), created_at, updated_at |
+| `user_restaurants` | User-to-restaurant access (many-to-many) | user_id (UUID), restaurant_id (UUID) |
+| `food` | Global food catalog (future expansion) | id (UUID), name |
+| `ingredients` | Recipe ingredients linking to food | id (UUID), recipe_id (FK), food_id (FK), quantity (REAL), unit (text), sort_order (int) |
+
+**Decisions already made:**
+1. Tech stack: Go + Templ + Datastar + SQLite. No alternatives.
+2. No frontend build step. Server-rendered HTML via Templ.
+3. SQLite for now, PostgreSQL later. Design allows migration path.
+4. JWT in Authorization header for all routes except `/login`.
+5. Roles are plain text: `admin`, `manager`, `staff`.
+6. UUIDs for all primary keys (not auto-increment).
+7. Configuration via environment variables (12-factor).
+8. Migrations embedded in binary via Go `embed` package, run on startup.
+9. Seed data via a separate Makefile target that runs a Go program.
+10. Password storage: bcrypt hash + salt on backend.
+
+**Approaches already ruled out (do not re-evaluate):**
+- Separate frontend SPA (React/Vue) — server-rendered HTML chosen.
+- Session-based auth (cookies) — JWT specified.
+- ORM (GORM, etc.) — direct SQL with repository pattern implied.
+- Auto-increment IDs — UUIDs specified.
+- Separate auth service — monolith architecture chosen.
+
+**Constraints:**
+- Go 1.22 (from go.mod).
+- SQLite as database. File-based, `recipes.db` at project root per Makefile.
+- Zero frontend build step — no npm, no webpack, no bundler.
+- JWT-based authentication with bcrypt password hashing.
+- Datastar is new — Context7 MCP must be consulted before generating Datastar code (per AGENTS.md).
+
+**Assumptions:**
+- Single binary deployment (embedded migrations, embedded static assets).
+- Small userbase (dozens, not thousands).
+- One server instance (no horizontal scaling concern with SQLite).
+- Port 8080 default (per README.md).
+
+**Resolved open questions:**
+- Configuration: environment variables (JWT secret, DB path, server port).
+- Migrations: embedded in binary, run on startup.
+- Seed data: separate Makefile target inserting test data.
+- Password storage: bcrypt hash + salt.
+- Auth complexity: keep simple for demo — JWT, users, passwords, securely stored. No registration UI, no password reset.
+
+### User-Confirmed Decisions (for this spec)
+
+| Decision | Choice |
+|----------|--------|
+| Migration file format | Plain `.sql` files |
+| Migration naming convention | Sequential numbers (e.g., `001_create_users.up.sql`) |
+| Migration execution | Auto-run on server startup |
+| Seed script format | Go program under `cmd/seed`, invoked via `make seed` |
+| Seed data content | 1 admin user, 1 manager user, 1 staff user, 2 restaurants, 3–5 test recipes with ingredients |
+| Foreign key enforcement | `PRAGMA foreign_keys = ON` on each connection |
+| Journal mode | `PRAGMA journal_mode = WAL` |
+
+---
+
+## Section 2: Requirements
+
+### 2.1 Migration Files
+
+**Location:** `migrations/` directory.
+
+**Naming convention:** `NNN_descriptive_name.up.sql` where `NNN` is a zero-padded three-digit sequential number starting at `001`.
+
+**Content:** Each file contains valid SQLite DDL statements. One or more `CREATE TABLE` statements per file, grouped logically.
+
+**Required tables (in dependency order):**
+
+1. `restaurants` — no foreign key dependencies.
+2. `users` — no foreign key dependencies.
+3. `food` — no foreign key dependencies.
+4. `user_restaurants` — depends on `users` and `restaurants`.
+5. `recipes` — depends on `restaurants`.
+6. `ingredients` — depends on `recipes` and `food`.
+
+**Column specifications:**
+
+- All `id` columns: `TEXT PRIMARY KEY` (UUID stored as text, generated by application).
+- All `*_id` foreign key columns: `TEXT NOT NULL` with `REFERENCES` clause.
+- `created_at`, `updated_at`: `INTEGER NOT NULL` (Unix epoch seconds).
+- `quantity`: `REAL NOT NULL`.
+- `unit`: `TEXT NOT NULL`.
+- `sort_order`: `INTEGER NOT NULL`.
+- `yield`: `INTEGER NOT NULL`.
+- `role`: `TEXT NOT NULL` (values: `admin`, `manager`, `staff` — enforced at application level, not DB constraint).
+- `name`, `username`, `instructions`, `password`: `TEXT NOT NULL`.
+
+**Foreign keys:**
+- `user_restaurants.user_id` → `users.id` (ON DELETE CASCADE).
+- `user_restaurants.restaurant_id` → `restaurants.id` (ON DELETE CASCADE).
+- `recipes.restaurant_id` → `restaurants.id` (ON DELETE CASCADE).
+- `ingredients.recipe_id` → `recipes.id` (ON DELETE CASCADE).
+- `ingredients.food_id` → `food.id` (ON DELETE RESTRICT — prevent deleting food that is in use).
+
+**Unique constraints:**
+- `users.username` — UNIQUE.
+- `user_restaurants(user_id, restaurant_id)` — composite UNIQUE.
+- `ingredients(recipe_id, sort_order)` — composite UNIQUE (one ingredient per sort position per recipe).
+
+**Indexes:**
+- `recipes.restaurant_id` — for scoped search queries.
+- `recipes.name` — for search queries.
+- `ingredients.recipe_id` — for fetching ingredients by recipe.
+
+### 2.2 Connection Layer
+
+**Responsibilities:**
+- Open a connection to the SQLite database file.
+- Apply connection-level pragmas on every new connection.
+- Provide a `*sql.DB` handle to the rest of the application.
+
+**Required pragmas (applied on each connection open):**
+- `PRAGMA foreign_keys = ON` — enforce referential integrity.
+- `PRAGMA journal_mode = WAL` — enable write-ahead logging for concurrent reads.
+
+**Configuration:**
+- Database file path read from environment variable `DB_PATH`. Default: `recipes.db` (project root, matching Makefile's `clean` target).
+
+**Edge cases:**
+- If `DB_PATH` points to a non-existent directory, the connection must fail with a clear error.
+- If the database file is corrupt, the connection must fail with a clear error.
+- The connection pool must respect Go's `sql.DB` defaults for `MaxOpenConns` and `MaxIdleConns` (no custom tuning needed for a small demo).
+
+### 2.3 Migration Runner
+
+**Responsibilities:**
+- On server startup, before the HTTP listener begins, read all `.up.sql` files from the embedded `migrations/` directory.
+- Execute them in sequential order (by filename sort).
+- Track which migrations have been applied using a `schema_migrations` table (created automatically if it does not exist).
+- Skip already-applied migrations.
+- If any migration fails, the server must exit with a non-zero status code and log the error. It must not start in a partially-migrated state.
+
+**`schema_migrations` table:**
+- `version TEXT PRIMARY KEY` — the migration filename (e.g., `001_create_tables.up.sql`).
+- `applied_at INTEGER NOT NULL` — Unix epoch seconds when the migration was applied.
+
+**Edge cases:**
+- If the `migrations/` embedded directory is empty, the server starts normally (no-op).
+- If a migration file is modified after it has been applied, the runner must NOT re-apply it. The `version` column tracks by filename, not content hash.
+- If two migration files have the same name (impossible with sequential numbering, but defensive), the runner must fail.
+
+### 2.4 Seed Script
+
+**Location:** `cmd/seed/main.go`.
+
+**Invocation:** `make seed` (add a `seed` target to the Makefile).
+
+**Behavior:**
+- Opens the same database file as the server (using `DB_PATH` env var, same default).
+- Inserts test data using direct SQL statements (not the repository layer — the repository layer does not exist yet at this milestone).
+- Must be idempotent: running `make seed` multiple times must not create duplicate data. Use `INSERT OR IGNORE` or check for existence before inserting.
+
+**Test data to insert:**
+
+| Entity | Details |
+|--------|---------|
+| Admin user | username: `admin`, password: bcrypt hash of `password123`, role: `admin` |
+| Manager user | username: `manager`, password: bcrypt hash of `password123`, role: `manager` |
+| Staff user | username: `staff`, password: bcrypt hash of `password123`, role: `staff` |
+| Restaurant 1 | name: `The Rusty Spoon` |
+| Restaurant 2 | name: `Copper Kettle` |
+| User-restaurant links | Admin → both restaurants, Manager → Restaurant 1, Staff → Restaurant 1 |
+| Food items | At least 8 food entries (e.g., flour, sugar, butter, eggs, salt, milk, chicken, rice) |
+| Recipes | 3–5 recipes belonging to Restaurant 1, each with 3–6 ingredients referencing the food items |
+
+**UUID generation:** Generate UUIDs at seed time using a deterministic or random method. If deterministic (e.g., hash of name), the seed is fully reproducible. If random, the seed produces different IDs each run but remains idempotent via `INSERT OR IGNORE` on unique fields.
+
+**Edge cases:**
+- If the database does not exist or has not been migrated, the seed script must fail with a clear error (not silently insert into nothing).
+- If test data already exists (e.g., username `admin` already present), the seed script must skip that row, not error.
+
+### 2.5 Makefile Updates
+
+**New target: `seed`**
+- Runs `go run ./cmd/seed`.
+- Depends on the database existing and being migrated (the seed script itself should verify this).
+
+**Existing targets remain unchanged:**
+- `run`, `test`, `tidy`, `clean` — no modifications.
+
+### 2.6 Out of Scope
+
+The following are explicitly NOT part of this milestone:
+- HTTP server or handlers (Milestone 003+).
+- Repository/data access layer Go code (Milestone 002).
+- Templ templates or frontend (Milestone 004+).
+- JWT or authentication logic (Milestone 003).
+- Recipe CRUD endpoints (Milestone 005).

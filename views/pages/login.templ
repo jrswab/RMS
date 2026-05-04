@@ -1,0 +1,17 @@
+package pages
+
+templ Login(errorMsg string) {
+	<div class="login-container">
+		<h1>Log In</h1>
+		if errorMsg != "" {
+			<div class="error">{ errorMsg }</div>
+		}
+		<form method="POST" action="/login/browser">
+			<label for="username">Username</label>
+			<input type="text" id="username" name="username" required/>
+			<label for="password">Password</label>
+			<input type="password" id="password" name="password" required/>
+			<button type="submit">Log In</button>
+		</form>
+	</div>
+}

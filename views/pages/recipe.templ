@@ -1,0 +1,69 @@
+package pages
+
+import (
+	"fmt"
+	"lab37/internal/store"
+	"lab37/views/components"
+)
+
+templ RecipeView(username string, restaurants []store.Restaurant, recipe store.Recipe, ingredients []IngredientWithFood, canEdit bool, canDelete bool) {
+	@components.Header(username, restaurants)
+	<main>
+		<div id="recipe-view-page" data-signals={ recipeViewSignals(recipe.RestaurantID) }>
+			<h1>{ recipe.Name }</h1>
+			<div class="recipe-meta">
+				<p><strong>Yield:</strong> { fmt.Sprintf("%d", recipe.Yield) }</p>
+			</div>
+			<div class="recipe-instructions">
+				<h2>Instructions</h2>
+				<p>{ recipe.Instructions }</p>
+			</div>
+			<div class="recipe-ingredients">
+				<h2>Ingredients</h2>
+				if len(ingredients) == 0 {
+					<p class="empty-state">No ingredients added yet.</p>
+				} else {
+					<table>
+						<thead>
+							<tr>
+								<th>Food</th>
+								<th>Quantity</th>
+								<th>Unit</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, ing := range ingredients {
+								<tr>
+									<td>{ ing.FoodName }</td>
+									<td>{ fmt.Sprintf("%g", ing.Quantity) }</td>
+									<td>{ ing.Unit }</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				}
+			</div>
+			<div class="recipe-actions">
+				if canEdit {
+					<a href={ templ.SafeURL(fmt.Sprintf("/recipe/%s/edit", recipe.ID)) } class="button-primary">Edit</a>
+				}
+				if canDelete {
+					<button data-on:click={ fmt.Sprintf("@post('/recipe/%s/delete-confirm')", recipe.ID) } class="button-danger">Delete</button>
+				}
+				<a href="/" class="button-secondary">Back to Home</a>
+			</div>
+			<div id="delete-confirmation"></div>
+		</div>
+	</main>
+	@components.Footer()
+}
+
+templ RecipeDeleteDialog(recipe store.Recipe) {
+	<div class="delete-confirmation-dialog">
+		<p>Are you sure you want to delete <strong>{ recipe.Name }</strong>?</p>
+		<div class="confirmation-actions">
+			<button data-on:click={ fmt.Sprintf("@delete('/recipe/%s')", recipe.ID) } class="button-danger">Confirm Delete</button>
+			<button data-on:click={ fmt.Sprintf("@post('/recipe/%s/delete-cancel')", recipe.ID) } class="button-secondary">Cancel</button>
+		</div>
+	</div>
+}

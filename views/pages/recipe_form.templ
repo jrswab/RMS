@@ -1,0 +1,99 @@
+package pages
+
+import (
+	"fmt"
+	"lab37/internal/store"
+	"lab37/views/components"
+)
+
+templ RecipeForm(username string, restaurants []store.Restaurant, selectedRestaurantID string, recipe store.Recipe, ingredients []IngredientRow, errors map[string]string, isEdit bool) {
+	{{
+		submitAction := "@post('/recipe/new')"
+		if isEdit {
+			submitAction = fmt.Sprintf("@patch('/recipe/%s')", recipe.ID)
+		}
+	}}
+	@components.Header(username, restaurants)
+	<main>
+		<div id="recipe-form-page" data-signals={ recipeFormSignals(selectedRestaurantID, ingredients) }>
+			if isEdit {
+				<h1>Edit Recipe</h1>
+			} else {
+				<h1>Create New Recipe</h1>
+			}
+			<script>
+				window.renderIngredientRows = window.renderIngredientRows || function(ingredients) {
+					const escapeAttr = (value) => String(value ?? '')
+						.replaceAll('&', '&amp;')
+						.replaceAll('"', '&quot;')
+						.replaceAll('<', '&lt;')
+						.replaceAll('>', '&gt;')
+
+					return ingredients.map((ingredient, i) => `
+						<div class="ingredient-row">
+							<input type="text" placeholder="Food name" data-bind="ingredients.${i}.foodName" value="${escapeAttr(ingredient.foodName)}"/>
+							<input type="text" placeholder="Qty" data-bind="ingredients.${i}.quantity" value="${escapeAttr(ingredient.quantity)}"/>
+							<input type="text" placeholder="Unit" data-bind="ingredients.${i}.unit" value="${escapeAttr(ingredient.unit)}"/>
+							<button type="button" class="button-danger" data-on:click="$ingredients = $ingredients.filter((_, idx) => idx !== ${i}); $_ingredientRowsVersion++">Remove</button>
+						</div>
+					`).join('')
+				}
+			</script>
+			<form data-on:submit__prevent={ submitAction }>
+				<div class="form-group">
+					<label for="name">Recipe Name</label>
+					<input type="text" id="name" data-bind:name value={ recipe.Name }/>
+					if err, ok := errors["name"]; ok {
+						<span class="error">{ err }</span>
+					}
+				</div>
+				<div class="form-group">
+					<label>Restaurant</label>
+					<span class="restaurant-display">
+						for _, r := range restaurants {
+							if r.ID == selectedRestaurantID {
+								{ r.Name }
+							}
+						}
+					</span>
+					<input type="hidden" data-bind:selectedRestaurant value={ selectedRestaurantID }/>
+					if err, ok := errors["restaurant"]; ok {
+						<span class="error">{ err }</span>
+					}
+				</div>
+				<div class="form-group">
+					<label for="yield">Yield</label>
+					<input type="text" id="yield" data-bind:yield value={ fmt.Sprintf("%d", recipe.Yield) }/>
+					if err, ok := errors["yield"]; ok {
+						<span class="error">{ err }</span>
+					}
+				</div>
+				<div class="form-group">
+					<label for="instructions">Instructions</label>
+					<textarea id="instructions" data-bind:instructions>{ recipe.Instructions }</textarea>
+					if err, ok := errors["instructions"]; ok {
+						<span class="error">{ err }</span>
+					}
+				</div>
+				<div class="ingredients-section">
+					<h2>Ingredients</h2>
+					<div id="ingredient-rows" data-effect="$_ingredientRowsVersion; el.innerHTML = @peek(() => window.renderIngredientRows($ingredients))" data-init__delay.1ms="$_ingredientRowsVersion++"></div>
+					if err, ok := errors["ingredients"]; ok {
+						<span class="error">{ err }</span>
+					}
+					<button type="button" class="button-secondary" data-on:click="$ingredients.push({foodName: '', quantity: '', unit: ''}); $_ingredientRowsVersion++">Add Ingredient</button>
+				</div>
+				<div class="form-actions">
+					if isEdit {
+						<button type="submit" class="button-primary">Save Changes</button>
+						<a href={ templ.SafeURL(fmt.Sprintf("/recipe/%s", recipe.ID)) } class="button-secondary">Cancel</a>
+					} else {
+						<button type="submit" class="button-primary">Create Recipe</button>
+						<a href="/" class="button-secondary">Cancel</a>
+					}
+				</div>
+			</form>
+		</div>
+	</main>
+	@components.Footer()
+}

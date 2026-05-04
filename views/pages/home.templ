@@ -1,0 +1,46 @@
+package pages
+
+import (
+	"fmt"
+	"lab37/internal/store"
+	"lab37/views/components"
+)
+
+templ Home(username string, restaurants []store.Restaurant) {
+	@components.Header(username, restaurants)
+	<main>
+		if len(restaurants) == 0 {
+			<div class="no-restaurant-state">
+				<h1>Welcome, { username }</h1>
+				<p>You don't have access to any restaurants yet. Contact your administrator.</p>
+			</div>
+		} else {
+			<h1>Welcome, { username }</h1>
+			<div class="search-section">
+				<div class="search-form">
+					<input data-bind:search-query type="text" placeholder="Search recipes..."/>
+					<button data-on:click="@post('/search')" class="button-primary">Search</button>
+				</div>
+				<div id="search-results"></div>
+				<button data-on:click="if ($selectedRestaurant) window.location.href='/recipe/new?restaurant=' + $selectedRestaurant" data-attr:disabled="!$selectedRestaurant" class="button-primary">Create New Recipe</button>
+			</div>
+		}
+	</main>
+	@components.Footer()
+}
+
+templ SearchResults(recipes []store.Recipe, selectedRestaurant string) {
+	if selectedRestaurant == "" {
+		<p class="empty-state">Select a restaurant to search recipes.</p>
+	} else if len(recipes) == 0 {
+		<p class="empty-state">No recipes found.</p>
+	} else {
+		<ul class="recipe-list">
+			for _, r := range recipes {
+				<li>
+					<a href={ templ.SafeURL(fmt.Sprintf("/recipe/%s", r.ID)) }>{ r.Name }</a>
+				</li>
+			}
+		</ul>
+	}
+}

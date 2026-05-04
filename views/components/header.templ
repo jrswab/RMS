@@ -1,0 +1,25 @@
+package components
+
+import "lab37/internal/store"
+
+templ Header(username string, restaurants []store.Restaurant) {
+	<header data-signals="{selectedRestaurant: ''}">
+		<span class="header-left">Recipe Manager</span>
+		<span class="header-right">
+			<span class="user-info">{ username }</span>
+			if len(restaurants) == 0 {
+				<select data-bind:selected-restaurant disabled>
+					<option value="" disabled selected>No restaurants available</option>
+				</select>
+			} else {
+				<select data-bind:selected-restaurant data-on:change="@post('/search')">
+					<option value="" disabled selected>Select a restaurant</option>
+					for _, r := range restaurants {
+						<option value={ r.ID }>{ r.Name }</option>
+					}
+				</select>
+			}
+			<a href="/logout" class="logout-link">Logout</a>
+		</span>
+	</header>
+}
